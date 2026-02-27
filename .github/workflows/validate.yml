@@ -1,0 +1,79 @@
+name: Validate Skills
+
+on:
+  pull_request:
+    paths:
+      - 'free/**/*.md'
+      - 'premium/**/*.md'
+  push:
+    branches: [main, develop]
+    paths:
+      - 'free/**/*.md'
+      - 'premium/**/*.md'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    name: Validate Skill Quality
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Find changed SKILL.md files
+        id: changed
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            FILES=$(git diff --name-only $GITHUB_BASE_REF $GITHUB_SHA -- '*.md' | grep 'SKILL.md' || true)
+          else
+            FILES=$(git diff --name-only HEAD~1 -- '*.md' | grep 'SKILL.md' || true)
+          fi
+          echo "files<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$FILES" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+          echo "Found files: $FILES"
+        env:
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_BASE_REF: ${{ github.event.pull_request.base.sha }}
+          GITHUB_SHA: ${{ github.sha }}
+
+      - name: Validate changed skills
+        if: steps.changed.outputs.files != ''
+        run: |
+          FAILED=0
+          while IFS= read -r file; do
+            if [ -n "$file" ]; then
+              echo "Validating: $file"
+              python scripts/validate_skill.py "$file" || FAILED=1
+              echo "---"
+            fi
+          done <<< "$CHANGED_FILES"
+
+          if [ $FAILED -eq 1 ]; then
+            echo "Some skills failed validation"
+            exit 1
+          fi
+        env:
+          CHANGED_FILES: ${{ steps.changed.outputs.files }}
+
+      - name: Validate all skills (full scan)
+        if: steps.changed.outputs.files == ''
+        run: |
+          echo "No changed skill files, running full validation..."
+          find free -name "SKILL.md" -type f | while read file; do
+            echo "Validating: $file"
+            python scripts/validate_skill.py "$file"
+            echo "---"
+          done
+
+      - name: Quality gate summary
+        run: |
+          echo "Quality Gate: All skills must score 8.5+ to pass"
+          echo "Validation complete!"

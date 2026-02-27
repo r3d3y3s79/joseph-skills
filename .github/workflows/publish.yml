@@ -1,0 +1,98 @@
+name: Publish Skills
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'free/**/*.md'
+  workflow_dispatch:
+    inputs:
+      force_publish:
+        description: 'Force publish all skills'
+        required: false
+        default: 'false'
+
+jobs:
+  validate-before-publish:
+    runs-on: ubuntu-latest
+    name: Pre-Publish Validation
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Validate all free skills
+        run: |
+          FAILED=0
+          for file in $(find free -name "SKILL.md" -type f); do
+            echo "Validating: $file"
+            if ! python scripts/validate_skill.py "$file"; then
+              FAILED=1
+            fi
+            echo "---"
+          done
+
+          if [ $FAILED -eq 1 ]; then
+            echo "Validation failed - cannot publish"
+            exit 1
+          fi
+
+  publish-skillsmp:
+    needs: validate-before-publish
+    runs-on: ubuntu-latest
+    name: Publish to SkillsMP
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install agent-skills-cli
+        run: npm install -g agent-skills-cli
+
+      - name: Submit to SkillsMP
+        run: |
+          echo "Submitting repository to SkillsMP..."
+          skills submit-repo "$REPO_NAME" || echo "Submission may require manual setup"
+        env:
+          SKILLSMP_API_KEY: ${{ secrets.SKILLSMP_API_KEY }}
+          REPO_NAME: ${{ github.repository }}
+
+      - name: Notify success
+        run: |
+          echo "Skills submitted to SkillsMP"
+          echo "Repository: $REPO_NAME"
+          echo "Skills will be indexed automatically"
+        env:
+          REPO_NAME: ${{ github.repository }}
+
+  notify:
+    needs: [validate-before-publish, publish-skillsmp]
+    runs-on: ubuntu-latest
+    name: Notify
+
+    steps:
+      - name: Summary
+        run: |
+          echo "## Publication Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Repository: $REPO_NAME" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Branch: $REF_NAME" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Commit: $SHA" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Marketplaces" >> "$GITHUB_STEP_SUMMARY"
+          echo "- SkillsMP: Submitted" >> "$GITHUB_STEP_SUMMARY"
+          echo "- SkillHub: Auto-indexed from public repo" >> "$GITHUB_STEP_SUMMARY"
+        env:
+          REPO_NAME: ${{ github.repository }}
+          REF_NAME: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}

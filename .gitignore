@@ -1,0 +1,15 @@
+*.pyc
+__pycache__/
+.env
+*.log
+node_modules/
+dist/
+*.zip
+.DS_Store
+.vscode/
+*.swp
+*.swo
+.idea/
+
+HANDOFF.md
+logs/
